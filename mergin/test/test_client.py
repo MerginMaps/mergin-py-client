@@ -1,10 +1,11 @@
+from datetime import datetime, timedelta
 import logging
 import os
-import tempfile
-import shutil
-from datetime import datetime, timedelta
 import pytest
 import pytz
+import shutil
+import sqlite3
+import tempfile
 
 from ..client import MerginClient, ClientError, MerginProject, LoginError, decode_token_data, TokenError
 from ..client_push import push_project_async, push_project_cancel
@@ -132,6 +133,46 @@ def test_create_remote_project_from_local(mc):
     # unable to download to the same directory
     with pytest.raises(Exception, match='Project directory already exists'):
         mc.download_project(project, download_dir)
+
+
+def test_failing_rebase(mc):
+    """
+    Make sure failing rebase exceptions are handled properly
+    """
+    test_project = 'test_failing_rebase'
+    project = API_USER + '/' + test_project
+    project_dir = os.path.join(TMP_DIR, test_project)  # primary project dir
+    project_dir_2 = os.path.join(TMP_DIR, test_project+'_2')  # concurrent project dir
+    cleanup(mc, project, [project_dir, project_dir_2])
+    shutil.copytree(TEST_DATA_DIR, project_dir)  # copy project data
+    mc.create_project_and_push(test_project, project_dir)
+
+    # Download project to the concurrent dir add a feature
+    mc.download_project(project, project_dir_2)  # download project to concurrent dir
+    mp_2 = MerginProject(project_dir_2)
+    f_updated = 'base.gpkg'
+    shutil.copy(mp_2.fpath('inserted_1_A.gpkg'), mp_2.fpath(f_updated))
+    # Upload the change to server
+    mc.push_project(project_dir_2)
+
+    # Change schema in the primary project dir
+    con = sqlite3.connect(os.path.join(project_dir, f_updated))
+    cursor = con.cursor()
+    cursor.execute('PRAGMA journal_mode=WAL;')
+    cursor.execute('CREATE TABLE test (fid SERIAL, txt TEXT);')
+    cursor.execute('INSERT INTO test VALUES (123, \'hello\');')
+    cursor.execute('COMMIT;')
+
+    # check changes in project_dir_2 before applied
+    pull_changes, push_changes, _ = mc.project_status(project_dir)
+    assert next((f for f in pull_changes['updated'] if f['path'] == f_updated), None)
+    assert next((f for f in push_changes['updated'] if f['path'] == f_updated), None)
+
+    mc.pull_project(project_dir)
+    del cursor
+    del con
+
+    # check conflict copy - it should not contain the new table
 
 
 def test_push_pull_changes(mc):
