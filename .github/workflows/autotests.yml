@@ -32,7 +32,7 @@ jobs:
 
       - name: Run tests
         run: |
-          gdb -ex run -ex bt -ex quit --args pytest --cov=mergin mergin/test/
+          gdb -ex run -ex bt -ex quit --args python -m pytest --cov=mergin mergin/test/
 
       - name: Submit coverage to Coveralls
         env:
