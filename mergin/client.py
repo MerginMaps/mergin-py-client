@@ -557,6 +557,7 @@ class MerginClient:
         return True, free_space
 
     def user_info(self):
+        """Returns  JSON dict with connected user's info"""
         resp = self.get("/v1/user/" + self.username())
         return json.load(resp)
 
